@@ -1,0 +1,306 @@
+import streamlit as st
+
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+
+from langchain_ibm import WatsonxLLM, WatsonxEmbeddings
+
+
+# -------------------------------
+# IBM Watsonx Configuration
+# -------------------------------
+
+WATSONX_URL = "YOUR_WATSONX_URL"
+PROJECT_ID = "YOUR_PROJECT_ID"
+
+
+# -------------------------------
+# Create IBM Granite Model
+# -------------------------------
+
+def granite_model():
+
+    llm = WatsonxLLM(
+        model_id="ibm/granite-3-8b-instruct",
+        url=WATSONX_URL,
+        project_id=PROJECT_ID,
+
+        params={
+            "max_new_tokens":500,
+            "temperature":0.3
+        }
+    )
+
+    return llm
+
+
+
+# -------------------------------
+# Create Embedding Model
+# -------------------------------
+
+def embedding_model():
+
+    embeddings = WatsonxEmbeddings(
+
+        model_id="ibm/slate-125m-english-rtrvr",
+
+        url=WATSONX_URL,
+
+        project_id=PROJECT_ID
+
+    )
+
+    return embeddings
+
+
+
+# -------------------------------
+# Document Processing + RAG
+# -------------------------------
+
+def process_document(file):
+
+
+    with open("study.pdf","wb") as f:
+        f.write(file.getbuffer())
+
+
+    loader = PyPDFLoader(
+        "study.pdf"
+    )
+
+
+    documents = loader.load()
+
+
+
+    splitter = RecursiveCharacterTextSplitter(
+
+        chunk_size=500,
+
+        chunk_overlap=100
+    )
+
+
+    chunks = splitter.split_documents(
+        documents
+    )
+
+
+
+    db = Chroma.from_documents(
+
+        chunks,
+
+        embedding_model(),
+
+        persist_directory="knowledge_base"
+
+    )
+
+
+    return db
+
+
+
+
+# -------------------------------
+# AI Response Generator
+# -------------------------------
+
+def ask_ai(question, db, task):
+
+
+    docs = db.similarity_search(
+        question,
+        k=3
+    )
+
+
+    context=""
+
+
+    for d in docs:
+
+        context += d.page_content
+
+
+
+    prompt=f"""
+
+You are Smart Study Generator Agent.
+
+Use the study material below.
+
+Generate educational content.
+
+Context:
+
+{context}
+
+
+Task:
+
+{task}
+
+
+Question:
+
+{question}
+
+
+Answer clearly for students.
+
+"""
+
+
+    llm=granite_model()
+
+
+    response = llm.invoke(prompt)
+
+
+    return response
+
+
+
+
+# -------------------------------
+# Streamlit Application
+# -------------------------------
+
+
+st.set_page_config(
+    page_title="Smart Study Generator",
+    page_icon="📚"
+)
+
+
+st.title(
+    "📚 Smart Study Generator Agent"
+)
+
+
+st.write(
+"""
+AI-powered learning assistant using
+IBM Granite + RAG + LangFlow concept.
+"""
+)
+
+
+
+uploaded_file = st.file_uploader(
+
+    "Upload PDF Notes",
+
+    type=["pdf"]
+
+)
+
+
+
+if uploaded_file:
+
+
+    if "db" not in st.session_state:
+
+
+        with st.spinner(
+            "Processing document..."
+        ):
+
+            st.session_state.db = process_document(
+                uploaded_file
+            )
+
+
+        st.success(
+            "Study Material Added Successfully"
+        )
+
+
+
+if "db" in st.session_state:
+
+
+    option = st.selectbox(
+
+        "Select Action",
+
+        [
+        "Ask Question",
+        "Generate Summary",
+        "Create Flashcards",
+        "Generate MCQ",
+        "Create Study Plan"
+        ]
+
+    )
+
+
+
+    query = st.text_input(
+        "Enter Topic / Question"
+    )
+
+
+
+    if st.button("Generate"):
+
+
+        if option=="Generate Summary":
+
+            task="""
+            Create a short summary
+            with important points.
+            """
+
+        elif option=="Create Flashcards":
+
+            task="""
+            Create flashcards with
+            Question and Answer format.
+            """
+
+        elif option=="Generate MCQ":
+
+            task="""
+            Generate 10 MCQ questions
+            with answers.
+            """
+
+        elif option=="Create Study Plan":
+
+            task="""
+            Create a personalized
+            7 day study plan.
+            """
+
+        else:
+
+            task="""
+            Answer the student question.
+            """
+
+
+
+        result = ask_ai(
+
+            query,
+
+            st.session_state.db,
+
+            task
+
+        )
+
+
+        st.subheader(
+            "AI Output"
+        )
+
+
+        st.write(result)
